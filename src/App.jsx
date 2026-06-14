@@ -235,10 +235,26 @@ const todayKey = () => toKey(new Date());
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DIAS = ["L","M","M","J","V","S","D"];
 
+// Omega 3 son 2 cápsulas independientes; el esencial cuenta con ambas.
+// Compat: datos viejos guardaban omega3 boolean (true = ambas).
+const omega3Done = (day) => day.omega3 === true || (!!day.omega3a && !!day.omega3b);
+
+// Migra datos viejos: omega3 boolean -> dos cápsulas (omega3a/omega3b).
+function migrate(data) {
+  Object.values(data.days || {}).forEach((day) => {
+    if (day.omega3 === true) { day.omega3a = true; day.omega3b = true; }
+    if ("omega3" in day) delete day.omega3;
+  });
+  return data;
+}
+
 function dayCompletion(day, waterTarget) {
   if (!day) return 0;
   let done = 0;
-  CORE_KEYS.forEach((k) => { if (day[k]) done++; });
+  CORE_KEYS.forEach((k) => {
+    if (k === "omega3") { if (omega3Done(day)) done++; }
+    else if (day[k]) done++;
+  });
   if ((day.water || 0) >= waterTarget) done++;
   return done / (CORE_KEYS.length + 1);
 }
@@ -275,11 +291,11 @@ function exportData(data) {
 function parseImport(raw) {
   const obj = JSON.parse(raw);
   if (!obj || typeof obj !== "object") throw new Error("Archivo inválido");
-  return {
+  return migrate({
     days: obj.days && typeof obj.days === "object" ? obj.days : {},
     shopping: obj.shopping && typeof obj.shopping === "object" ? obj.shopping : {},
     waterTarget: Number.isFinite(obj.waterTarget) ? obj.waterTarget : DEFAULT_DATA.waterTarget,
-  };
+  });
 }
 
 // ---------- Icons (SVG de línea) ----------
@@ -321,6 +337,8 @@ function Icon({ name, size = 20, stroke = "currentColor", style }) {
       return <svg {...c}><path d="M12 3v12" /><path d="m7 11 5 5 5-5" /><path d="M5 21h14" /></svg>;
     case "upload":
       return <svg {...c}><path d="M12 21V9" /><path d="m7 13 5-5 5 5" /><path d="M5 3h14" /></svg>;
+    case "refresh":
+      return <svg {...c}><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 4v5h-5" /></svg>;
     default:
       return null;
   }
@@ -338,7 +356,7 @@ export default function App() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setData({ ...DEFAULT_DATA, ...JSON.parse(raw) });
+      if (raw) setData(migrate({ ...DEFAULT_DATA, ...JSON.parse(raw) }));
     } catch (e) {
       console.error("No se pudo leer el guardado", e);
     }
@@ -378,6 +396,10 @@ export default function App() {
       shopping[id] = !shopping[id];
       return { ...prev, shopping };
     });
+
+  // desmarca toda la lista del súper (para empezar una compra nueva)
+  const resetShopping = () =>
+    setData((prev) => ({ ...prev, shopping: {} }));
 
   // importa un respaldo .json reemplazando el estado actual
   const importFromFile = (file) => {
@@ -432,7 +454,7 @@ export default function App() {
             />
           )}
           {tab === "super" && (
-            <Super shopping={data.shopping} toggleShop={toggleShop} />
+            <Super shopping={data.shopping} toggleShop={toggleShop} resetShopping={resetShopping} />
           )}
         </main>
 
@@ -487,9 +509,13 @@ function Hoy({ today, target, progress, toggle, setWater }) {
       )}
 
       <Card title="Esenciales del día">
-        {DAILY_CORE.map((d) => (
-          <Check key={d.key} item={d} on={!!today[d.key]} onClick={() => toggle(d.key)} />
-        ))}
+        {DAILY_CORE.map((d) =>
+          d.key === "omega3" ? (
+            <Omega3Row key={d.key} day={today} toggle={toggle} />
+          ) : (
+            <Check key={d.key} item={d} on={!!today[d.key]} onClick={() => toggle(d.key)} />
+          )
+        )}
       </Card>
 
       <Card title="Hidratación" sub={`Meta: ${(target * 0.25).toFixed(1)} L`}>
@@ -529,6 +555,41 @@ function Check({ item, on, onClick }) {
       </span>
       <span style={{ ...S.box, ...(on ? S.boxOn : {}) }}>{on ? "✓" : ""}</span>
     </button>
+  );
+}
+
+// Omega 3: dos cápsulas con su propio botón cada una.
+function Omega3Row({ day, toggle }) {
+  const legacy = day.omega3 === true; // dato viejo: contaba como ambas tomadas
+  const caps = [
+    { key: "omega3a", n: 1 },
+    { key: "omega3b", n: 2 },
+  ];
+  const both = omega3Done(day);
+  return (
+    <div style={S.check}>
+      <span style={{ width: 24, display: "grid", placeItems: "center" }}>
+        <Icon name="fish" size={20} stroke={both ? "var(--ink-soft)" : "var(--accent)"} />
+      </span>
+      <span style={{ ...S.checkLabel, ...(both ? { color: "var(--ink-soft)" } : {}) }}>
+        Omega 3 <span style={{ color: "var(--ink-soft)", fontSize: 12.5 }}>· 2 cápsulas</span>
+      </span>
+      <div style={S.capRow}>
+        {caps.map((c) => {
+          const on = legacy || !!day[c.key];
+          return (
+            <button
+              key={c.key}
+              style={{ ...S.cap, ...(on ? S.capOn : {}) }}
+              onClick={() => toggle(c.key)}
+              aria-label={`Cápsula ${c.n} de omega 3`}
+            >
+              {on ? "✓ " : ""}Cáps {c.n}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -697,13 +758,20 @@ function Stat({ big, label }) {
 }
 
 // ---------- Súper ----------
-function Super({ shopping, toggleShop }) {
+function Super({ shopping, toggleShop, resetShopping }) {
   const allItems = SHOPPING.flatMap((g) => g.items.map((it) => `${g.group}:${it.name}`));
   const got = allItems.filter((id) => shopping[id]).length;
+  const onReset = () => {
+    if (got === 0) return;
+    if (confirm("¿Desmarcar todos los productos de la lista?")) resetShopping();
+  };
   return (
     <div style={S.page}>
       <Card title="Lista del súper" sub={`${got} de ${allItems.length} marcados`}>
         <p style={S.tip}>Todo lo que necesitas para armar los menús. Las cantidades son un estimado para ~1 semana alternando Día A y B. Marca lo que ya tienes.</p>
+        <button style={{ ...S.resetBtn, ...(got === 0 ? S.resetBtnOff : {}) }} onClick={onReset} disabled={got === 0}>
+          <Icon name="refresh" size={16} stroke={got === 0 ? "var(--ink-soft)" : "var(--accent)"} /> Reiniciar lista
+        </button>
       </Card>
       {SHOPPING.map((g) => (
         <Card key={g.group} title={g.group}>
@@ -800,6 +868,13 @@ const S = {
   qty: { fontSize: 12.5, color: "var(--ink-soft)", flexShrink: 0, marginRight: 10, whiteSpace: "nowrap" },
   box: { width: 24, height: 24, borderRadius: 8, border: "2px solid var(--ring-bg)", display: "grid", placeItems: "center", color: "#fff", fontSize: 14, fontWeight: 700, flexShrink: 0 },
   boxOn: { background: "var(--accent)", borderColor: "var(--accent)" },
+
+  capRow: { display: "flex", gap: 8, flexShrink: 0 },
+  cap: { padding: "7px 11px", borderRadius: 10, border: "2px solid var(--ring-bg)", color: "var(--ink-soft)", fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap" },
+  capOn: { background: "var(--accent)", borderColor: "var(--accent)", color: "#fff" },
+
+  resetBtn: { marginTop: 12, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "11px 0", borderRadius: 12, background: "var(--accent-soft)", color: "var(--accent)", fontSize: 14, fontWeight: 600 },
+  resetBtnOff: { background: "var(--ring-bg)", color: "var(--ink-soft)", cursor: "default" },
 
   waterRow: { display: "flex", alignItems: "center", gap: 12 },
   waterBtn: { width: 46, height: 46, borderRadius: 14, background: "var(--accent-soft)", color: "var(--accent)", fontSize: 24, fontWeight: 700, display: "grid", placeItems: "center" },
