@@ -27,6 +27,13 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Setup Pages
+        # enablement: true conmuta Pages a modo "GitHub Actions" aunque el repo
+        # estuviera en "Deploy from a branch". Evita tener que tocar Settings.
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - name: Install
         run: npm ci
 
