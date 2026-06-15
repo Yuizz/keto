@@ -13,6 +13,8 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+      // El registro lo hacemos manualmente en src/main.jsx (con auto-reload).
+      injectRegister: null,
       includeAssets: ["favicon.svg", "icon-192.png", "icon-512.png", "icon-maskable.png"],
       manifest: {
         name: "Ruta Keto",
