@@ -27,12 +27,30 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Force GitHub Actions as Pages source
+        # configure-pages/enablement NO cambia el build_type si Pages ya existe
+        # en modo "Deploy from a branch" (Jekyll), lo que provoca un deploy
+        # legacy en paralelo que pisa el nuestro. Este PUT lo conmuta a
+        # "workflow" de forma definitiva. POST como fallback si no existe.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api="https://api.github.com/repos/${{ github.repository }}/pages"
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$api" -d '{"build_type":"workflow"}')
+          echo "PUT /pages -> $code"
+          if [ "$code" = "404" ]; then
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "$api" -d '{"build_type":"workflow"}')
+            echo "POST /pages -> $code"
+          fi
+
       - name: Setup Pages
-        # enablement: true conmuta Pages a modo "GitHub Actions" aunque el repo
-        # estuviera en "Deploy from a branch". Evita tener que tocar Settings.
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Install
         run: npm ci
